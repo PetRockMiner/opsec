@@ -56,7 +56,7 @@ Our not-so-secret but totally rad tools:
 
 5. **Launch the Voyager**:
     ```bash
-    streamlit run app.py
+    streamlit run opsec.py
     ```
 
    Grab your space helmet! Your browser's setting course for the meme stock galaxies.
