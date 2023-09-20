@@ -12,6 +12,7 @@ import networkx as nx
 from textblob import TextBlob
 import logging
 from collections import Counter
+from collections import defaultdict
 from gensim import corpora, models
 import emoji
 import pandas as pd
@@ -26,6 +27,13 @@ import random
 from wordcloud import STOPWORDS
 from sklearn.manifold import TSNE
 import numpy as np
+
+# Streamlit App Configuration
+st.set_page_config(
+    page_title="Major Player Analysis Console",
+    page_icon="🚀",
+    layout="wide"
+)
 
 # Add this near the top of your script (after initializing Streamlit, but before any other Streamlit commands)
 if 'word_of_interest' not in st.session_state:
@@ -47,49 +55,90 @@ for handler in logger.handlers[:]:
 twitter = TweeterPy()
 
 def user_association_graph(username, hashtags, mentions, common_words):
-    nt = Network(notebook=True, height='600px', width='700px', bgcolor='#222222', font_color='white')
+    # Initialize graph
+    G = nx.Graph()
     
-    USER_NODE_SIZE = 25  # Adjust this value to control the size of the user node
-
-    # Ensure username is a string
-    username = str(username)
+    # Add the main user to the graph with a fixed size
+    G.add_node(username, size=30, color='black')
     
-    # Add node for the user with a constant size
-    nt.add_node(username, color="black", title=username, size=USER_NODE_SIZE)
+    # Extract frequencies for each category and add them to the graph
+    hashtag_counts = Counter(hashtags)
+    mention_counts = Counter(mentions)
+    word_counts = Counter(common_words)
 
-    # Add nodes and edges for hashtags
-    for hashtag in hashtags:
-        hashtag = str(hashtag)  # Ensure hashtag is a string
-        nt.add_node(hashtag, color="purple", title=hashtag)
-        nt.add_edge(username, hashtag, color="red")
+    # Add hashtags to graph
+    for hashtag, count in hashtag_counts.items():
+        G.add_node(hashtag, size=10 + count*5, color='purple')
+        G.add_edge(username, hashtag, weight=count)
 
-    # Add nodes and edges for mentions
-    for mention in mentions:
-        mention = str(mention)  # Ensure mention is a string
-        nt.add_node(mention, color="yellow", title=mention)
-        nt.add_edge(username, mention, color="red")
-
-    # Add nodes and edges for common words
-    for word in common_words:
-        word = str(word)  # Ensure word is a string
-        nt.add_node(word, color="orange", title=word)
-        nt.add_edge(username, word, color="red")
-
-    # Calculate degree for each node
-    degrees = {}
-    for edge in nt.edges:
-        source = edge['from']
-        target = edge['to']
-        degrees[source] = degrees.get(source, 0) + 1
-        degrees[target] = degrees.get(target, 0) + 1
+    # Add mentions to graph
+    for mention, count in mention_counts.items():
+        G.add_node(mention, size=10 + count*5, color='yellow')
+        G.add_edge(username, mention, weight=count)
     
-    # Adjust node size based on degree (number of connections)
-    for node in nt.nodes:
-        if node["id"] != username:
-            node_degree = degrees.get(node["id"], 0)
-            node["size"] = 10 + node_degree * 5
+    # Add common words to graph
+    for word, count in word_counts.items():
+        G.add_node(word, size=10 + count*5, color='red')
+        G.add_edge(username, word, weight=count)
 
-    return nt
+    return G
+
+def association_graph_plotly(G):
+    pos = nx.spring_layout(G, dim=3, seed=42)  # 3D layout
+
+    edge_trace = go.Scatter3d(
+        x=[],
+        y=[],
+        z=[],
+        mode='lines',
+        line=dict(width=2, color='#888'),
+    )
+
+    for edge in G.edges():
+        x0, y0, z0 = pos[edge[0]]
+        x1, y1, z1 = pos[edge[1]]
+        edge_trace['x'] += tuple([x0, x1, None])
+        edge_trace['y'] += tuple([y0, y1, None])
+        edge_trace['z'] += tuple([z0, z1, None])
+
+    node_trace = go.Scatter3d(
+        x=[],
+        y=[],
+        z=[],
+        text=[],
+        mode='markers+text',
+        textposition="top center",
+        hoverinfo='text',
+        marker=dict(
+            showscale=True,
+            colorscale='YlGnBu',
+            size=[],
+            color=[],
+            opacity=0.8,
+            sizemode='diameter'
+        )
+    )
+
+    for node in G.nodes():
+        x, y, z = pos[node]
+        node_trace['x'] += tuple([x])
+        node_trace['y'] += tuple([y])
+        node_trace['z'] += tuple([z])
+        node_trace['text'] += tuple([node])
+        node_trace['marker']['color'] += tuple([G.nodes[node]['color']])
+        node_trace['marker']['size'] += tuple([G.nodes[node]['size']])
+
+    layout = go.Layout(
+        title="Association Graph",
+        scene=dict(
+            xaxis=dict(nticks=4, range=[-1, 1]),
+            yaxis=dict(nticks=4, range=[-1, 1]),
+            zaxis=dict(nticks=4, range=[-1, 1]),
+        )
+    )
+
+    fig = go.Figure(data=[edge_trace, node_trace], layout=layout)
+    return fig
 
 def mention_relationship_graph(tweets, main_username):
     # Initialize graph
@@ -109,7 +158,7 @@ def mention_relationship_graph(tweets, main_username):
     
     # Add mentions and edges to the graph
     for mention, count in mention_counts.items():
-        G.add_node(mention, size=10 + count*5, color='red' if count > 5 else 'yellow')
+        G.add_node(mention, size=10 + count*5, color='purple' if count > 5 else 'red')
         G.add_edge(main_username, mention, weight=count)
     
     return G
@@ -261,16 +310,97 @@ ego_weights = {
     "sexy": 2.1, "hottest": 2.2, "irresistible": 2.3, "stunning": 2.2, 
     "dazzling": 2.2, "ravishing": 2.3, "alluring": 2.2, "magnetic": 2.2, 
     "hypnotic": 2.3, "mesmerizing": 2.3, "captivating": 2.3, "gorgeous": 2.3, 
-    "divine": 2.4, "flawless": 2.4, "perfect": 2.5
+    "divine": 2.4, "flawless": 2.4, "perfect": 2.5,
+
+    # AMC and Meme Stocks related weights
+    "hodl": 2, "to the moon": 2.5, "diamond hands": 2.2, "rocket": 2.3, 
+    "moonshot": 2.4, "tendies": 2.1, "squeeze": 2.3, "paper hands": 1.8,
+    "apes": 1.7, "not financial advice": 1.5, "buy the dip": 2.3
 }
 
 def calculate_ego_score(tokens):
+    if not tokens:
+        return 0
     total_count = len(tokens)
     ego_count = sum(ego_weights.get(word, 0) for word in tokens)
-    if total_count == 0:
-        return 0
-    return ego_count / total_count     
+    return ego_count / total_count
+
+def ego_classification(score):
+    if score > 70:
+        return "High Ego"
+    elif 30 <= score <= 70:
+        return "Medium Ego"
+    else:
+        return "Low Ego"
+
+def generate_gauge_chart(score):
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=score,
+        domain={"x": [0, 1], "y": [0, 1]},
+        title={"text": "Ego Score"},
+        gauge={
+            "axis": {"range": [None, 100]},
+            "steps": [
+                {"range": [0, 30], "color": "green"},
+                {"range": [30, 70], "color": "yellow"},
+                {"range": [70, 100], "color": "red"}
+            ],
+            "bar": {"color": "blue"}
+        }
+    ))
+    st.plotly_chart(fig)  # Display the gauge chart directly within the function
+
+def generate_word_cloud(word_freq):
+    if not word_freq:
+        st.warning("No words provided for the word cloud!")
+        return
+
+    wordcloud = WordCloud(width=800, height=400, background_color="white").generate_from_frequencies(word_freq)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.imshow(wordcloud, interpolation="bilinear")
+    ax.axis("off")
     
+    st.pyplot(fig)  # Pass the figure to Streamlit's st.pyplot()
+
+# Initializing ego_word_freq at the beginning
+ego_word_freq = defaultdict(int)
+
+def analyze_ego_centricity(tweets):
+    all_tokens = []
+    ego_scores = []
+    
+    for tweet in tweets:
+        text = tweet['content']['itemContent']['tweet_results']['result']['legacy'].get('full_text', '')
+        tokens = tokenize(preprocess_text(text))  # Assuming you have a tokenize and preprocess_text function
+        all_tokens.extend(tokens)
+        score = calculate_ego_score(tokens)
+        ego_scores.append(score)
+        
+        for token in tokens:
+            if token in ego_weights:
+                ego_word_freq[token] += 1 
+
+    # Calculate ego-related metrics
+    ego_result = ego_classification(np.mean(ego_scores))
+    ego_score = np.mean(ego_scores)
+    ego_words = dict(Counter(ego_word_freq).most_common())  # Use Counter for word frequency
+    
+
+    return ego_result, ego_score, ego_words
+
+def get_ego_word_frequencies(text, ego_words):
+    # Tokenize the text
+    words = text.split()
+    
+    # Get frequencies of each word
+    word_counts = Counter(words)
+    
+    # Filter out words that are not ego words
+    ego_word_freq = {word: count for word, count in word_counts.items() if word in ego_words}
+
+    return ego_word_freq    
 
 # Function to calculate toxic weights
 # Toxic weights definition
@@ -320,7 +450,7 @@ if 'prev_slider_values' not in st.session_state:
 
 usernames = st.text_input("Yo fam, drop the @ of your mark (no '@' needed, we chillin'):")
 usernames = [username.strip() for username in usernames.split(",")]
-num_tweets = st.slider("How many tweets we scrapin' today?", min_value=1, max_value=100, value=5, step=1)
+num_tweets = st.slider("How many tweets we scrapin' today? Don't be mid af MAX it out for the best experience no cap...", min_value=1, max_value=100, value=5, step=1)
 max_edge_width = st.slider("Max Edge Width for the Network Graph - Make it thicc or slim, shady...", min_value=1, max_value=20, value=5, step=1)
 
 if st.button("Fetch the deets! 🚀"):
@@ -331,6 +461,10 @@ if st.session_state.fetch_info_pressed:
         if not username:
             st.warning("Bruh, drop a name, don't leave me hanging!")
             continue  # Skip to the next iteration if the username is empty
+
+        # Resetting the ego_word_freq dictionary for each user
+        
+        ego_word_freq.clear()    
 
         try:
             user_id_from_tweeterpy = twitter.get_user_id(username)
@@ -402,7 +536,7 @@ if st.session_state.fetch_info_pressed:
                 """, unsafe_allow_html=True)
 
                 st.markdown("---")
-                st.markdown(f"## 🕵️‍♂️ OpSec completed for: @{username} 🕵️‍♂️")
+                st.markdown(f"## 🕵️‍♂️ OpSec insights for: @{username} 🕵️‍♂️")
 
                 # Call the function to get AMC price and store it in amc_price variable
                 amc_price = get_amc_price()         
@@ -449,6 +583,8 @@ if st.session_state.fetch_info_pressed:
                     st.write(f"**MOASS Ticket Price**: ${amc_price:.2f}")                    
 
                 st.markdown("---")
+
+                st.write(user_data)
 
 
                 # Token Extraction and Visualization
@@ -506,11 +642,32 @@ if st.session_state.fetch_info_pressed:
 
                 ego_scores = [calculate_ego_score(tokenize(tweet['content']['itemContent']['tweet_results']['result']['legacy'].get('full_text', ''))) for tweet in tweets]
                 average_ego_score = sum(ego_scores) / len(tweets) if tweets else 0
+                absolute_ego_score = sum(1 for score in ego_scores if score > 0.2) / len(tweets) if tweets else 0
+                
+                ego_words = dict(Counter(ego_word_freq).most_common())  # Use Counter for word frequency
 
-                st.write(f"{username}'s Ego Score: {ego_score:.2%} - {('High-key self-love vibes 💅' if ego_score > 0.5 else 'Pretty chill 🍹')}")
-                fig_ego = px.bar(x=[username], y=[average_ego_score], labels={'y':'Ego-centricity Score'}, title=f"Ego-centricity Score for {username}")
+                # Run the analysis
+                ego_result, ego_score, ego_words = analyze_ego_centricity(tweets)
+
+                # Check if there are ego-centric words, then display the word cloud
+                if ego_words:
+                    generate_word_cloud(ego_words)
+
+                # Display ego words with better formatting
+                st.markdown(f"**Ego Words for {username}:**")
+                for word, count in ego_words.items():
+                    st.markdown(f"- **{word}**: {count}")    
+                
+                # Display ego score with enhanced formatting
+                st.markdown(f"**{username}'s Ego Score:** {ego_score:.2%}")
+                st.markdown(f"*Vibe:* {('High-key self-love vibes 💅' if ego_score > 0.3 else 'Pretty chill 🍹')}")
+                
+                fig_ego = px.bar(x=[username], y=[ego_score], labels={'y':'Ego Score (%)'}, title=f"Ego-centricity Score for {username}")
                 st.plotly_chart(fig_ego)
 
+                # Visualization
+                fig = generate_gauge_chart(ego_score * 100)
+                
 
                 # Toxic Speech Identification
                 with st.expander("Toxic Speech Identification Details"):
@@ -598,7 +755,7 @@ if st.session_state.fetch_info_pressed:
                 st.plotly_chart(fig_enhanced_sentiment_pie)
 
                 # Tracked Words Analysis
-                tracked_words = ["gasparino", "shill", "moass", "ftd", "squeeze", "darkpool", "short", "distort", "naked"]
+                tracked_words = ["gasparino", "adam aron", "apes", "ken griffin", "doug cifu", "cover", "shill", "shills", "moass", "ftd", "squeeze", "darkpool", "short and distort", "off exchange", "flash crash", "naked shorts", "sec", "grifter", "retail investors", "gary gensler", "citadel", "virtu"]
                 word_occurrences = {word: 0 for word in tracked_words}
                 for tweet in tweets:
                     tweet_text = tweet['content']['itemContent']['tweet_results']['result']['legacy'].get('full_text', '').lower()
@@ -774,58 +931,27 @@ if st.session_state.fetch_info_pressed:
                 common_words, _ = zip(*most_common_tokens)
 
 
-                # Association Network Graph using Pyvis
-                with st.expander("Association Graph"):
+                # Association Network Graph using Plotly
+                with st.expander("Association Network Graph using Plotly"):
                     st.write("This ain't just a graph, it's a whole web of who's who and what's what in our mark's tweets. Spider-Man would be jealous! 🕷️")
+                    
+                # Create the Association Graph using NetworkX
+                G_association = user_association_graph(username, all_unique_hashtags, all_unique_mentions, common_words)
+                    
+                # Visualize the Association Graph using Plotly
+                fig_association = association_graph_plotly(G_association)
+                st.plotly_chart(fig_association)
 
-                nt = user_association_graph(username, all_unique_hashtags, all_unique_mentions, common_words)
-                
-
-                # Set the physics of the graph for better visualization
-                nt.toggle_physics(True)
-
-                # Increase the size of the labels
-                nt.set_options("""
-                  var options = {
-                    "nodes": {
-                      "font": {
-                        "size": 15,
-                        "color": "white"
-                      }
-                    },
-                    "edges": {
-                      "color": {
-                        "inherit": true
-                      },
-                      "smooth": {
-                        "type": "continuous",
-                        "forceDirection": "none",
-                        "roundness": 0.05
-                      }
-                    },
-                    "physics": {
-                      "stabilization": {
-                        "enabled": true,
-                        "iterations": 1000,
-                        "updateInterval": 25
-                      }
-                    }
-                  }
-                """)
-
-                nt.show("tmp.html")
-                st.components.v1.html(nt.html, width=700, height=600)
-
-                with st.expander("Graph Legend"):
+                with st.expander("Association Network Graph Legend"):
                     st.write("""
                         * **Black Node**: That's our main dude or dudette!
                         * **Purple Node**: Hashtag vibes.
                         * **Yellow Node**: Peeps they're shouting out.
-                        * **Orange Node**: Words they just can't quit.
+                        * **Red Node**: Words they just can't quit.
                     """)
 
                 # Mention Relationship Network Graph using Plotly
-                with st.expander("Mention Relationship Graph"):
+                with st.expander("Mention Relationship Network Graph using Plotly"):
                     st.write("Ever wonder who our mark mentions the most? This graph spills the tea. 👀")
 
                 G = mention_relationship_graph(tweets, username)
@@ -885,7 +1011,14 @@ if st.session_state.fetch_info_pressed:
                 )
 
                 fig = go.Figure(data=[edge_trace, node_trace], layout=layout)
-                st.plotly_chart(fig)    
+                st.plotly_chart(fig)
+
+                with st.expander("Mention Relationship Graph Legend"):
+                    st.write("""
+                        * **Blue Node**: That's our main dude or dudette!
+                        * **Purple Node**: Frequent Mention vibes.
+                        * **Red Node**: Peeps the get no love, get rekt #SFYL.
+                    """)    
                 
                 # Process the tweets for LDA
                 processed_tweets = [preprocess_text(tweet['content']['itemContent']['tweet_results']['result']['legacy'].get('full_text', '')) for tweet in tweets]
@@ -925,7 +1058,7 @@ if st.session_state.fetch_info_pressed:
                 df = pd.DataFrame(embedding, columns=['x', 'y', 'z'])
 
                 # Plotting the 3D scatter plot
-                with st.expander("LDA Topic Visualization"):
+                with st.expander("LDA Topic 3D scatter plot Visualization"):
                     st.write("Put on your nerd glasses 🤓! Here's a 3D view of the topics from the tweets.")
                 
                 # Determine dominant topic for each document
@@ -938,21 +1071,35 @@ if st.session_state.fetch_info_pressed:
                 df['topic_words'] = df['dominant_topic'].apply(lambda x: ", ".join(get_topic_top_words(lda_model, x)))
 
                 # Calculate centroids
-                df_centroids = df.groupby('dominant_topic').mean().reset_index()
+                # Drop 'topic_words' column before computing the mean
+                df_numeric = df.drop(columns=['topic_words'])
+                df_centroids = df_numeric.groupby('dominant_topic').mean().reset_index()
+
+                # Add the topic_words column back to df_centroids
                 df_centroids['topic_words'] = df_centroids['dominant_topic'].apply(lambda x: ", ".join(get_topic_top_words(lda_model, x)))
 
+                # Custom Color Mapping
+                unique_topics = df['dominant_topic'].unique()
+                color_list_length = len(px.colors.qualitative.Plotly)
+                color_map = {
+                    topic: px.colors.qualitative.Plotly[i % color_list_length]
+                    for i, topic in enumerate(unique_topics)
+                }
 
                 fig = px.scatter_3d(df, x='x', y='y', z='z',
                                     color='dominant_topic',
                                     labels={'color': 'Dominant Topic'},
                                     title="LDA Topic Visualization in 3D",
                                     hover_name='topic_words',
-                                    hover_data={'x': False, 'y': False, 'z': False, 'dominant_topic': True})
+                                    hover_data={'x': False, 'y': False, 'z': False, 'dominant_topic': True},
+                                    color_discrete_map=color_map)  # Use the custom color map here
                 
                 # Add centroids to the plot
                 centroids_fig = px.scatter_3d(df_centroids, x='x', y='y', z='z', 
                                               text='topic_words', 
-                                              color='dominant_topic')
+                                              color='dominant_topic',
+                                              color_discrete_map=color_map)  # Use the custom color map here too
+                
                 for trace in centroids_fig.data:
                     fig.add_trace(trace)
 
