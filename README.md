@@ -1,6 +1,7 @@
 # MemeStock Vibes Analyzer 📈🚀
+
 Python 3.9
-***built on tweeterpy 1.0.6 needs to be updated for 1.0.7***
+requires tweeterpy 1.0.6 needs to be updated for 1.0.7
 
 Hey there, stonk astronauts! 🌌 Dying to know if the cosmic Twitter realm vibes with your beloved meme stocks the same way you do? Or are those sneaky paper hands throwing some shade again? Hold your rockets! We've got **MemeStock Vibes Analyzer** - the "ultra-mega-super-secret" weapon for every meme stock aficionado. (Alright, alright, it's not *that* secret, but let's keep it on the down-low, okay? 😉)
 
