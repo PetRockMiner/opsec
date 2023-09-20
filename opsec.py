@@ -378,16 +378,22 @@ def analyze_ego_centricity(tweets):
         score = calculate_ego_score(tokens)
         ego_scores.append(score)
         
+        # Check individual tokens
         for token in tokens:
             if token in ego_weights:
-                ego_word_freq[token] += 1 
+                ego_word_freq[token] += 1
+
+        # Check multi-word ego-centric phrases
+        for i in range(len(tokens) - 1):
+            two_word_phrase = tokens[i] + ' ' + tokens[i + 1]
+            if two_word_phrase in ego_weights:
+                ego_word_freq[two_word_phrase] += 1         
 
     # Calculate ego-related metrics
     ego_result = ego_classification(np.mean(ego_scores))
     ego_score = np.mean(ego_scores)
     ego_words = dict(Counter(ego_word_freq).most_common())  # Use Counter for word frequency
     
-
     return ego_result, ego_score, ego_words
 
 def get_ego_word_frequencies(text, ego_words):
