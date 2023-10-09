@@ -1,7 +1,7 @@
 # MemeStock Vibes Analyzer 📈🚀
 
 # Python 3.9
-# Requires tweeterpy 1.0.6 needs to be updated for 1.0.7
+# Requires tweeterpy 1.0.6 needs to be updated for 1.0.8
 
 ```bash
 pip install tweeterpy==1.0.6
